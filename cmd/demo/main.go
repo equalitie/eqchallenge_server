@@ -14,7 +14,8 @@
 // Config from env: EQC_SECRET (random per start if unset), EQC_LISTEN (default :8080),
 // EQC_CODE_LENGTH, EQC_TTL_SECONDS, EQC_PASS_TTL_SECONDS, EQC_POW_MAX_NUMBER.
 // Behaviour recording: EQC_FEATURES_FILE (JSONL, off if unset), EQC_LABEL (written on every
-// line, e.g. "human" or "bot-headless"), EQC_FEATURES_RAW=1 (also the raw HIS traces).
+// line, e.g. "human" or "bot-headless"), EQC_FEATURES_RAW=1 (also the raw HIS traces),
+// EQC_DEMO_SHOW_FEATURES=1 (show visitors their own features; demo only, it helps bots tune).
 package main
 
 import (
@@ -72,7 +73,7 @@ func main() {
 	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           newMux(issuer, rec),
+		Handler:           newMux(issuer, rec, os.Getenv("EQC_DEMO_SHOW_FEATURES") == "1"),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Printf("listening on %s", addr)
@@ -92,7 +93,9 @@ func envInt(name string) int {
 	return n
 }
 
-func newMux(issuer *codechallenge.Issuer, rec *recorder) *http.ServeMux {
+// newMux serves the demo. showFeatures sends clients the behaviour features computed from
+// what they sent, for the demo page to show; never do that in production.
+func newMux(issuer *codechallenge.Issuer, rec *recorder, showFeatures bool) *http.ServeMux {
 	mux := http.NewServeMux()
 	hasPass := func(r *http.Request) bool {
 		c, err := r.Cookie(passCookie)
@@ -118,6 +121,7 @@ func newMux(issuer *codechallenge.Issuer, rec *recorder) *http.ServeMux {
 		render(w, http.StatusTooManyRequests, "challenge.html", map[string]any{
 			"Widget":       web.Widget,
 			"WidgetConfig": string(widgetConfig),
+			"ShowFeatures": showFeatures,
 		})
 	})
 
@@ -157,11 +161,17 @@ func newMux(issuer *codechallenge.Issuer, rec *recorder) *http.ServeMux {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot create a challenge"})
 			return
 		}
-		fields := map[string]any{"his": behavior.Features(his)}
+		features := behavior.Features(his)
+		fields := map[string]any{"his": features}
 		if rec != nil && rec.raw {
 			fields["his_raw"] = his
 		}
 		rec.record("issued", c.ID(), fields)
+		if showFeatures {
+			if b, err := json.Marshal(features); err == nil {
+				w.Header().Set("X-Eqc-Demo-Features", string(b))
+			}
+		}
 		writeJSON(w, http.StatusOK, c)
 	})
 
@@ -204,9 +214,14 @@ func newMux(issuer *codechallenge.Issuer, rec *recorder) *http.ServeMux {
 			}
 		}
 		rec.record("verify", res.ID, fields)
+		resp := map[string]any{"verified": res.Verified}
+		if showFeatures && fields["code_step"] != nil {
+			resp["behavior"] = fields["code_step"]
+		}
 		if !res.Verified {
 			log.Printf("verify: %s", res.Reason)
-			writeJSON(w, http.StatusOK, map[string]any{"verified": false, "reason": reasonText[res.Reason]})
+			resp["reason"] = reasonText[res.Reason]
+			writeJSON(w, http.StatusOK, resp)
 			return
 		}
 		log.Print("verify: passed")
@@ -218,7 +233,8 @@ func newMux(issuer *codechallenge.Issuer, rec *recorder) *http.ServeMux {
 			Secure:   r.TLS != nil,
 			SameSite: http.SameSiteLaxMode,
 		})
-		writeJSON(w, http.StatusOK, map[string]any{"verified": true, "payload": res.Pass})
+		resp["payload"] = res.Pass
+		writeJSON(w, http.StatusOK, resp)
 	})
 	return mux
 }

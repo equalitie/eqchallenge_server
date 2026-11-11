@@ -11,6 +11,16 @@
     }
     body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
     main { max-width: 34rem; margin: 10vh auto; padding: 0 16px; }
+    /* room for the demo's behaviour panel next to the card, where the code form can't cover it */
+    main.with-aside { max-width: 64rem; display: grid; grid-template-columns: minmax(0, 34rem) minmax(0, 1fr); gap: 24px; align-items: start; }
+    @media (max-width: 52rem) { main.with-aside { grid-template-columns: minmax(0, 1fr); } }
+    .aside h2 { font-size: 1rem; margin: 0 0 4px; }
+    .aside h3 { font-size: .85rem; margin: 16px 0 4px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .aside table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+    .aside td { padding: 3px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .aside td:last-child { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 12px; }
+    .aside .hint { color: var(--muted); font-size: .8rem; }
+    .aside button { margin-top: 16px; font: inherit; padding: 8px 16px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
     .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 24px; }
     h1 { font-size: 1.3rem; margin: 0 0 8px; }
     p { margin: 0 0 12px; }
@@ -25,6 +35,6 @@
   </style>
 </head>
 <body>
-  <main><div class="card">{{template "content" .}}</div></main>
+  <main{{block "mainclass" .}}{{end}}><div class="card">{{template "content" .}}</div>{{block "aside" .}}{{end}}</main>
 </body>
 </html>{{end}}

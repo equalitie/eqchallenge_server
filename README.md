@@ -31,7 +31,9 @@ Settings (env): `EQC_SECRET` (random per start if unset; never commit one),
 
 The demo records behaviour features (no IP, no User-Agent, nothing typed) to
 `data/features.jsonl`, one line per challenge and per verify. Label a session:
-`EQC_LABEL=human docker compose up`. `data/` is git-ignored; keep it that way. On Linux,
+`EQC_LABEL=human docker compose up`. The compose demo also shows visitors the features
+computed from their clicks and typing, in a panel next to the challenge
+(`EQC_DEMO_SHOW_FEATURES=1`); a real deployment must not, it tells bots what they look like. `data/` is git-ignored; keep it that way. On Linux,
 make `data/` writable for the container's user (`mkdir -p data && chmod 777 data`).
 
 Without Docker: `go run ./cmd/demo` (Go 1.25+; set `EQC_FEATURES_FILE` to record).

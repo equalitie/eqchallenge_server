@@ -17,5 +17,8 @@ services:
       EQC_FEATURES_FILE: /data/features.jsonl
       EQC_LABEL: ${EQC_LABEL:-unlabelled}
       EQC_FEATURES_RAW: ${EQC_FEATURES_RAW:-0}
+      # show visitors the features computed from their clicks and typing. Demo only:
+      # a real challenge must not tell a bot what it looks like.
+      EQC_DEMO_SHOW_FEATURES: ${EQC_DEMO_SHOW_FEATURES:-1}
     volumes:
       - ./data:/data

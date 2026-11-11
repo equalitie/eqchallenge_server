@@ -1,4 +1,19 @@
 {{define "title"}}Verification{{end}}
+{{define "mainclass"}}{{if .ShowFeatures}} class="with-aside"{{end}}{{end}}
+{{define "aside"}}{{if .ShowFeatures}}
+<aside class="card aside" id="features" hidden>
+  <h2>What Baskerville saw</h2>
+  <p class="hint">Demo only: a real challenge never shows a client its own features.</p>
+  <h3>Before the click</h3>
+  <table id="features-his"></table>
+  <div id="features-code-step" hidden>
+    <h3>Typing the code</h3>
+    <table id="features-code"></table>
+    <p class="hint" id="features-result"></p>
+  </div>
+  <button id="features-continue" hidden>Continue</button>
+</aside>
+{{end}}{{end}}
 {{define "content"}}
 <img class="dog" src="/baskerville.gif" alt="Baskerville, the Deflect bot hound, sniffing you">
 <h1>One more step</h1>
@@ -17,12 +32,63 @@ speaker button to hear them.</p>
 <script type="module">{{.Widget}}</script>
 <script type="module">
   const widget = document.getElementById("altcha");
-  // /eqc/verify sets the pass cookie in its response; reload to get the page
+  const panel = document.getElementById("features"); // only in demo mode
+  // /eqc/verify sets the pass cookie in its response; reload to get the page. In demo mode
+  // wait for "Continue", so the features can be read first.
   widget.addEventListener("statechange", (ev) => {
     if (ev.detail.state === "verified") {
-      location.reload();
+      if (panel) {
+        const next = document.getElementById("features-continue");
+        next.hidden = false;
+        next.onclick = () => location.reload();
+      } else {
+        location.reload();
+      }
     }
   });
+
+  // labels for pkg/behavior's JSON fields, in the order shown
+  const hisLabels = {
+    pointer_n: "Mouse samples",
+    touch_n: "Touch samples",
+    first_move_ms: "First move after page load, ms",
+    span_ms: "Moving for, ms",
+    path_px: "Path length, px",
+    straightness: "Straightness (1 = ruler line)",
+    speed_mean: "Speed, px/ms",
+    speed_cv: "Speed variation",
+    interval_cv: "Timing irregularity",
+    pauses_n: "Pauses over 250 ms",
+    turn_mean_rad: "Mean turn, rad",
+    sharp_turns_n: "Turns over 90°",
+    still_n: "Samples without movement",
+    touch_force_sd: "Touch pressure variation",
+    keyboard_focus_n: "Focus moved with Tab",
+    scroll_n: "Scroll samples",
+    max_touch_points: "Touch points of the device",
+  };
+  const codeLabels = {
+    shown_ms: "Image to submit, ms",
+    keys: "Keys pressed",
+    key_gap_mean: "Mean gap between keys, ms",
+    key_gap_cv: "Typing rhythm variation",
+    pasted: "Pasted",
+    audio_played: "Listened to the audio",
+    reloads: "New images asked for",
+  };
+  function fillTable(id, labels, values) {
+    const table = document.getElementById(id);
+    table.replaceChildren();
+    for (const [key, label] of Object.entries(labels)) {
+      if (!(key in values)) continue;
+      let v = values[key];
+      if (typeof v === "number" && !Number.isInteger(v)) v = v.toFixed(v < 10 ? 3 : 0);
+      if (typeof v === "boolean") v = v ? "yes" : "no";
+      const row = table.insertRow();
+      row.insertCell().textContent = label;
+      row.insertCell().textContent = String(v);
+    }
+  }
 
   // How the code form is used, sent with the code (pkg/behavior.CodeStep). Counts and
   // timings only, never what was typed.
@@ -45,6 +111,17 @@ speaker button to hear them.</p>
   document.addEventListener("play", (ev) => { if (inCodeForm(ev)) audio = true; }, true);
 
   widget.configure({
+    // in demo mode the HIS response carries the features the server computed
+    fetch: async (url, init) => {
+      const resp = await fetch(url, init);
+      const features = panel && resp.headers.get("X-Eqc-Demo-Features");
+      if (features) {
+        fillTable("features-his", hisLabels, JSON.parse(features));
+        document.getElementById("features-code-step").hidden = true;
+        panel.hidden = false;
+      }
+      return resp;
+    },
     verifyFunction: async (payload, code) => {
       try {
         const resp = await fetch("/eqc/verify", {
@@ -63,7 +140,14 @@ speaker button to hear them.</p>
             },
           }),
         });
-        return await resp.json();
+        const result = await resp.json();
+        if (panel && result.behavior) {
+          fillTable("features-code", codeLabels, result.behavior);
+          document.getElementById("features-result").textContent =
+            result.verified ? "Right code." : "Wrong code: tick the box again for a new image.";
+          document.getElementById("features-code-step").hidden = false;
+        }
+        return result;
       } catch (err) {
         // the widget does not catch a failing verifyFunction and would hang in "verifying"
         return { verified: false, reason: String(err) };

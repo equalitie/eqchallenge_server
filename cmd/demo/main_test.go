@@ -32,7 +32,7 @@ func newRecordingServer(t *testing.T, rec *recorder) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(newMux(issuer, rec))
+	srv := httptest.NewServer(newMux(issuer, rec, false))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -236,6 +236,45 @@ func TestRecording(t *testing.T) {
 	for _, private := range []string{"127.0.0.1", "Go-http-client", "000000"} {
 		if strings.Contains(string(raw), private) {
 			t.Fatalf("recorded %q:\n%s", private, raw)
+		}
+	}
+}
+
+// Features go back to the client only in demo mode: they would help a bot tune itself.
+func TestShowFeaturesOnlyInDemoMode(t *testing.T) {
+	for _, show := range []bool{false, true} {
+		issuer, err := codechallenge.New(codechallenge.Config{Secret: "test-secret-not-for-production", PoWMaxNumber: 5, PoWCost: 10}, codechallenge.NewMemoryStore())
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(newMux(issuer, nil, show))
+		defer srv.Close()
+
+		_, page := get(t, srv.URL+"/protected")
+		if got := bytes.Contains(page, []byte(`id="features"`)); got != show {
+			t.Fatalf("show=%v: features panel on page: %v", show, got)
+		}
+		resp, body := postJSON(t, srv.URL+"/eqc/his", testHIS)
+		header := resp.Header.Get("X-Eqc-Demo-Features")
+		if (header != "") != show || (show && !strings.Contains(header, `"pointer_n":4`)) {
+			t.Fatalf("show=%v: features header %q", show, header)
+		}
+		var c codechallenge.Challenge
+		json.Unmarshal(body, &c)
+		ac := altcha.Challenge{Parameters: c.Parameters, Signature: c.Signature}
+		sol, err := altcha.SolveChallenge(altcha.SolveChallengeOptions{Challenge: ac, DeriveKey: altcha.DeriveKeyPBKDF2()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, _ := json.Marshal(altcha.Payload{Challenge: ac, Solution: *sol})
+		req, _ := json.Marshal(map[string]any{
+			"code":     "x",
+			"payload":  base64.StdEncoding.EncodeToString(p),
+			"behavior": map[string]any{"shown_ms": 3000, "keys": 1},
+		})
+		_, vbody := postJSON(t, srv.URL+"/eqc/verify", string(req))
+		if got := bytes.Contains(vbody, []byte(`"behavior"`)); got != show {
+			t.Fatalf("show=%v: verify response %s", show, vbody)
 		}
 	}
 }
