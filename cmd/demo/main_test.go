@@ -32,7 +32,7 @@ func newRecordingServer(t *testing.T, rec *recorder) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(newMux(issuer, rec, false))
+	srv := httptest.NewServer(newMux(issuer, rec, muxOptions{}))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -247,7 +247,7 @@ func TestShowFeaturesOnlyInDemoMode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		srv := httptest.NewServer(newMux(issuer, nil, show))
+		srv := httptest.NewServer(newMux(issuer, nil, muxOptions{showFeatures: show}))
 		defer srv.Close()
 
 		_, page := get(t, srv.URL+"/protected")
@@ -276,5 +276,21 @@ func TestShowFeaturesOnlyInDemoMode(t *testing.T) {
 		if got := bytes.Contains(vbody, []byte(`"behavior"`)); got != show {
 			t.Fatalf("show=%v: verify response %s", show, vbody)
 		}
+	}
+}
+
+func TestClientIP(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "10.0.0.5:41234"
+	r.Header.Set("X-Real-IP", "203.0.113.9")
+	if got := clientIP(r, ""); got != "10.0.0.5" {
+		t.Fatalf("no proxy header configured: got %q", got)
+	}
+	if got := clientIP(r, "X-Real-IP"); got != "203.0.113.9" {
+		t.Fatalf("behind a proxy: got %q", got)
+	}
+	r.Header.Del("X-Real-IP")
+	if got := clientIP(r, "X-Real-IP"); got != "10.0.0.5" {
+		t.Fatalf("header missing: got %q", got)
 	}
 }

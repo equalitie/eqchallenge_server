@@ -1,0 +1,87 @@
+# Public demo of cmd/demo. Not a production component: in production banjax links
+# pkg/codechallenge in. Placeholders are filled at apply time (see k8s/README.md), so no
+# cluster details live in this repository.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${NAMESPACE}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eqchallenge-demo
+  namespace: ${NAMESPACE}
+spec:
+  # one replica: attempts and used challenges live in its memory
+  replicas: 1
+  selector:
+    matchLabels: {app: eqchallenge-demo}
+  template:
+    metadata:
+      labels: {app: eqchallenge-demo}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: demo
+          image: ${IMAGE}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: EQC_SECRET
+              valueFrom:
+                secretKeyRef: {name: eqchallenge-demo, key: secret}
+            # ingress-nginx sets X-Real-IP and overwrites what the client sends
+            - name: EQC_CLIENT_IP_HEADER
+              value: X-Real-IP
+            # a public demo shows visitors their features, but does not record them:
+            # EQC_FEATURES_FILE stays unset
+            - name: EQC_DEMO_SHOW_FEATURES
+              value: "1"
+          readinessProbe:
+            httpGet: {path: /, port: 8080}
+          livenessProbe:
+            httpGet: {path: /, port: 8080}
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eqchallenge-demo
+  namespace: ${NAMESPACE}
+spec:
+  selector: {app: eqchallenge-demo}
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: eqchallenge-demo
+  namespace: ${NAMESPACE}
+  annotations:
+    cert-manager.io/cluster-issuer: ${CLUSTER_ISSUER}
+    # the widget posts HIS and codes, all small
+    nginx.ingress.kubernetes.io/proxy-body-size: 256k
+spec:
+  ingressClassName: ${INGRESS_CLASS}
+  tls:
+    - hosts: [${HOST}]
+      secretName: eqchallenge-demo-tls
+  rules:
+    - host: ${HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: eqchallenge-demo, port: {number: 80}}

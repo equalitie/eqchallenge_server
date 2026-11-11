@@ -16,6 +16,8 @@
 // Behaviour recording: EQC_FEATURES_FILE (JSONL, off if unset), EQC_LABEL (written on every
 // line, e.g. "human" or "bot-headless"), EQC_FEATURES_RAW=1 (also the raw HIS traces),
 // EQC_DEMO_SHOW_FEATURES=1 (show visitors their own features; demo only, it helps bots tune).
+// Behind a proxy: EQC_CLIENT_IP_HEADER names the header the proxy puts the client IP in
+// (X-Real-IP for ingress-nginx). Unset, the TCP peer is the client.
 package main
 
 import (
@@ -72,8 +74,11 @@ func main() {
 		addr = ":8080"
 	}
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           newMux(issuer, rec, os.Getenv("EQC_DEMO_SHOW_FEATURES") == "1"),
+		Addr: addr,
+		Handler: newMux(issuer, rec, muxOptions{
+			showFeatures:   os.Getenv("EQC_DEMO_SHOW_FEATURES") == "1",
+			clientIPHeader: os.Getenv("EQC_CLIENT_IP_HEADER"),
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Printf("listening on %s", addr)
@@ -93,10 +98,19 @@ func envInt(name string) int {
 	return n
 }
 
-// newMux serves the demo. showFeatures sends clients the behaviour features computed from
-// what they sent, for the demo page to show; never do that in production.
-func newMux(issuer *codechallenge.Issuer, rec *recorder, showFeatures bool) *http.ServeMux {
+type muxOptions struct {
+	// showFeatures sends clients the behaviour features computed from what they sent, for
+	// the demo page to show; never do that in production
+	showFeatures bool
+	// clientIPHeader is the header a trusted proxy puts the client IP in; empty means the
+	// TCP peer is the client. Behind a proxy without it, every visitor shares one binding.
+	clientIPHeader string
+}
+
+func newMux(issuer *codechallenge.Issuer, rec *recorder, opts muxOptions) *http.ServeMux {
 	mux := http.NewServeMux()
+	showFeatures := opts.showFeatures
+	clientBinding := func(r *http.Request) string { return clientIP(r, opts.clientIPHeader) }
 	hasPass := func(r *http.Request) bool {
 		c, err := r.Cookie(passCookie)
 		return err == nil && issuer.VerifyPass(c.Value, clientBinding(r))
@@ -261,10 +275,15 @@ func widgetLanguage(r *http.Request) string {
 	return strings.TrimSpace(tag)
 }
 
-// clientBinding is what challenges and passes are bound to: the client IP. The demo is
-// reached directly, so RemoteAddr is the client; behind a proxy it would be a header the
-// proxy sets, as banjax reads X-Client-IP from nginx.
-func clientBinding(r *http.Request) string {
+// clientIP is what challenges and passes are bound to. Behind a proxy it is the header the
+// proxy sets (as banjax reads X-Client-IP from nginx); the proxy must overwrite it, or
+// clients choose their own binding. Otherwise it is the TCP peer.
+func clientIP(r *http.Request, header string) string {
+	if header != "" {
+		if ip := strings.TrimSpace(r.Header.Get(header)); ip != "" {
+			return ip
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
