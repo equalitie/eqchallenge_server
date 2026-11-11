@@ -1,4 +1,4 @@
-# eqchallenge_server: our own ALTCHA code-challenge server (Sentinel replacement)
+# eqchallenge_server: our own ALTCHA code challenge (Sentinel replacement)
 
 Status: draft for a prototype, 2026-11-11.
 
@@ -12,13 +12,14 @@ Options we weighed (`baskervillehall/INTERACTIVE_CHALLENGE_OPTIONS.md`):
 |---|---|
 | Third party (Turnstile, reCAPTCHA, hCaptcha) | No: sends readers' data to Google/Cloudflare, blocked in Russia/China/Iran |
 | ALTCHA Sentinel (closed, self-hosted) | €99/month for up to 3 central instances, €799/month for unlimited (one per edge). 30-day trial without a key. Central service: extra latency, single point of failure, has to be reachable from Russia |
-| **ALTCHA + our own image/audio code server** | **This project.** Free, MIT widget, runs on every edge, no third party |
-| Our own interaction challenge ("press and hold" + ML) | Long term (deflect-ca/eqchallenge prototype). Can reuse this server's plumbing |
+| **ALTCHA + our own image/audio code challenge** | **This project.** Free, MIT widget, a Go library inside banjax on every edge, no third party, no central service |
+| Our own interaction challenge ("press and hold" + ML) | Long term (deflect-ca/eqchallenge prototype). Can reuse this library's plumbing |
 
 Sentinel is the server that ALTCHA's widget talks to for the "enter the code from the image"
 step (code challenge, with audio). The widget itself is open source and already renders that
 step. Its README says the code challenge needs "ALTCHA Sentinel or a custom server
-implementation". This project is the custom server.
+implementation". This project is that implementation, as a Go library that banjax links in,
+so every edge mints and verifies code challenges itself. There is no separate service to deploy.
 
 Limits we accept from the start:
 - An image code is a classic captcha. Vision models and captcha farms solve it. It filters
@@ -42,10 +43,7 @@ Limits we accept from the start:
 So the proof-of-work half exists. Missing: generating the code, its image and audio, and
 verifying the typed code.
 
-## 3. Widget protocol (checked in the altcha@3.5.0 bundle that banjax inlines)
-
-Verify this again against the unminified source (`altcha-org/altcha` tag v3.5.0) before
-relying on edge cases.
+## 3. Widget protocol (checked against the altcha v3.5.0 source, `src/Widget.svelte`)
 
 1. **Challenge.** The page gives the widget the usual v2 challenge JSON
    `{parameters: {...}, signature: "..."}` through the `challenge` attribute (banjax inlines it)
@@ -58,7 +56,9 @@ relying on edge cases.
      (for example `data:image/png;base64,...`) is used as is.
    - `audio`: optional; if present the widget shows an audio button and loads the URL with a
      `language` query parameter added (`audioChallengeLanguage` config, else the UI language).
-   - `length`: becomes the input's `maxlength`.
+   - `length`: becomes the input's `minlength` and `maxlength`.
+   - Relative `image` and `audio` URLs are resolved against the challenge URL when the
+     challenge was fetched, otherwise against the page.
 2. **Proof of work first.** The widget solves the PoW as today. If the challenge has a
    `codeChallenge`, it does not finish. It shows the code form: image, input, submit, reload,
    cancel and optional audio.
@@ -67,13 +67,27 @@ relying on edge cases.
    ```json
    { "code": "<typed code>", "payload": "<base64 PoW payload>" }
    ```
+   For a v2 challenge, `payload` is `base64(JSON{challenge: {parameters, signature}, solution})`,
+   the same format banjax already reads from `deflect_altcha` in `VerifyAltChaPayload`.
    It adds `fields` and `timeZone` only if `serverVerificationFields` / `serverVerificationTimeZone`
    are set. We leave them off.
 4. **Response.** `{"verified": true, "payload": "<string>"}` marks it verified. The widget
    replaces its payload with ours and fires `verified`. `{"verified": false, "reason": "..."}`
-   shows the reason. On HTTP >= 400 it shows `error` from a JSON body.
-5. **Reload button.** Asks for a new challenge (new image).
-6. Related, not needed now: the widget can send a "human interaction signature" (HIS) if the
+   shows the reason. On HTTP >= 400 it shows `error` from a JSON body. The response must be
+   `Content-Type: application/json`.
+5. **Reload button** calls `verify()` again: it re-reads the `challenge` source and solves the
+   PoW again. **A wrong code also ends the attempt**: the widget goes to the error state, the
+   code form closes (it is shown only in the `code` state), and the next click runs `verify()`
+   from scratch. Consequences:
+   - The `challenge` source must be a URL (`challenge="/eqc/challenge"`), not inlined JSON.
+     With inlined JSON, as banjax does today, reload gives the same challenge and the same
+     image, and after a wrong code the same, already used challenge comes back.
+   - With the stock widget a person gets one try per challenge, and each try costs a PoW. The
+     3-attempt limit in 4.2 is for clients that call `verifyUrl` directly. Keep the PoW cheap
+     for code challenges, or a typo costs the visitor seconds of solving on a phone.
+6. **Secure context.** `verify()` throws "Secure context (HTTPS) required." outside a secure
+   context. `http://localhost` is fine for the demo; any other plain-HTTP host is not.
+7. Related, not needed now: the widget can send a "human interaction signature" (HIS) if the
    server asks for it in the challenge response (`his.url`). Possible later input for option 4.
 
 ## 4. Design
@@ -82,10 +96,14 @@ relying on edge cases.
 
 A Go module with:
 - `pkg/codechallenge`: library. Mint a code challenge, render image and audio, verify a code.
-  No HTTP, no global state. **banjax imports this later**, so it runs on every edge.
-- `cmd/eqchallenge-server`: standalone HTTP server for the prototype and demos. It mints the
-  ALTCHA PoW too, so the whole flow works without banjax.
+  No HTTP, no global state. **banjax imports this later** and compiles it into its own binary,
+  so it runs on every edge with no new service, port or deployment. Edges don't talk to each
+  other or to a central server.
+- `cmd/demo`: a small `net/http` main for the prototype only. It wires the library to HTTP and
+  mints the ALTCHA PoW too, so the whole flow can be shown and bot-tested without touching
+  banjax. It is not a production component; after the banjax integration it is only a test bed.
 - `web/`: demo page with the pinned altcha@3.5.0 widget, inlined like banjax does.
+- `docker-compose.yml`: the demo, plus the bot tester as a second service.
 
 ### 4.2 Stateless by default
 
@@ -150,16 +168,17 @@ how hard is it for people".
 
 1. `pkg/codechallenge`: mint, render image (data URI), render audio, verify; unit tests
    (tampered data, wrong code, expired, wrong binding, replay).
-2. `cmd/eqchallenge-server`:
+2. `cmd/demo`:
    - `GET /` serves the demo page;
    - `GET /eqc/challenge` returns PoW + `codeChallenge`;
    - `GET /eqc/audio?t=` returns the audio;
    - `POST /eqc/verify` checks the code;
    - `GET /protected` returns 200 only with a valid pass cookie, otherwise the challenge page.
-3. Docker image. Config via env: `EQC_SECRET`, `EQC_CODE_LENGTH`, `EQC_TTL_SECONDS`,
-   `EQC_POW_MAX_NUMBER`, listen address.
+3. Dockerfile and `docker-compose.yml`: `docker compose up`, then open `/protected`. Config
+   via env: `EQC_SECRET`, `EQC_CODE_LENGTH`, `EQC_TTL_SECONDS`, `EQC_POW_MAX_NUMBER`,
+   `EQC_LISTEN`.
 4. Run `altcha-bot-tester` (banjax repo, `supporting-containers/altcha-bot-tester`) against
-   `/protected`, plus the new scenarios in section 6.
+   `/protected` from the same compose file, plus the new scenarios in section 6.
 
 Not in the prototype: banjax changes, Kafka, risk scoring, HIS, our own renderer (unless dchest
 fails the OCR test badly), languages beyond what dchest has.
@@ -182,7 +201,7 @@ fails the OCR test badly), languages beyond what dchest has.
 | Part | Effort |
 |---|---|
 | `pkg/codechallenge` with dchest/captcha, stateless verify, tests | 2–3 days |
-| Standalone server + demo page + Docker | 1–2 days |
+| Demo main + page + docker compose | 1 day |
 | Bot-tester scenarios (OCR, vision, Whisper) and the human test | 2–3 days |
 | Own image renderer, if dchest is too easy for OCR | +3–5 days |
 | banjax integration (decision, Kafka field, verify route, cookie, escalation, tests) | 1–2 weeks (Jeremy) |

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Prototype of our own server for the ALTCHA code challenge ("enter the code from the image",
+Prototype of our own implementation of the ALTCHA code challenge ("enter the code from the image",
 with audio), as a replacement for ALTCHA Sentinel. Read `SPEC.md` first: it has the widget
 protocol (checked against altcha@3.5.0), the stateless design, the prototype scope and the
 evaluation plan.
