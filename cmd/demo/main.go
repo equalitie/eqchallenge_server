@@ -5,6 +5,7 @@
 //	GET  /               home page
 //	GET  /protected      200 with a valid pass cookie, otherwise the challenge page
 //	GET  /reset          drops the pass cookie
+//	GET  /baskerville.gif  the dog on the challenge page
 //	GET  /eqc/challenge  proof of work + codeChallenge, for the widget
 //	GET  /eqc/audio?t=   the spoken code
 //	POST /eqc/verify     checks the code, sets the pass cookie
@@ -106,6 +107,12 @@ func newMux(issuer *codechallenge.Issuer) *http.ServeMux {
 			"Widget":       web.Widget,
 			"WidgetConfig": string(widgetConfig),
 		})
+	})
+
+	mux.HandleFunc("GET /baskerville.gif", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/gif")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(web.Baskerville)
 	})
 
 	mux.HandleFunc("GET /reset", func(w http.ResponseWriter, r *http.Request) {

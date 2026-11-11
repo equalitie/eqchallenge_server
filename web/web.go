@@ -11,6 +11,11 @@ import (
 //go:embed *.html altcha-3.5.0.i18n.min.js
 var files embed.FS
 
+// Baskerville is the sniffing dog on the challenge page.
+//
+//go:embed baskerville.gif
+var Baskerville []byte
+
 // Widget is the altcha@3.5.0 i18n bundle, to inline in a <script type="module">.
 var Widget template.JS
 
