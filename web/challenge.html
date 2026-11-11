@@ -8,8 +8,10 @@ speaker button to hear them.</p>
   challenge is a URL, not inlined JSON: the reload button and a retry after a wrong code
   call verify() again, which re-reads this source. With inlined JSON they would get the
   same, already used challenge back (SPEC.md section 3).
+  auto="off": the visitor ticks the box, so the widget's interaction signature has the
+  move to it. Solving on load would send an empty one.
 -->
-<altcha-widget id="altcha" challenge="/eqc/challenge" auto="onload" type="checkbox"
+<altcha-widget id="altcha" challenge="/eqc/challenge" auto="off" type="checkbox"
                configuration="{{.WidgetConfig}}"></altcha-widget>
 <p class="muted" id="altcha-failure" hidden>The check could not run. Reload the page to try again.</p>
 <script type="module">{{.Widget}}</script>
@@ -20,6 +22,53 @@ speaker button to hear them.</p>
     if (ev.detail.state === "verified") {
       location.reload();
     }
+  });
+
+  // How the code form is used, sent with the code (pkg/behavior.CodeStep). Counts and
+  // timings only, never what was typed.
+  let shownAt = 0, keys = 0, lastKey = 0, gaps = [], pasted = false, audio = false, images = 0;
+  widget.addEventListener("codechallenge", () => {
+    images++;
+    shownAt = performance.now();
+    keys = 0; lastKey = 0; gaps = []; pasted = false;
+  });
+  const inCodeForm = (ev) => ev.target instanceof Element && ev.target.closest(".altcha-code-challenge");
+  document.addEventListener("keydown", (ev) => {
+    if (!inCodeForm(ev) || ev.key === "Enter" || ev.key === "Tab") return;
+    const now = performance.now();
+    if (lastKey) gaps.push(Math.round(now - lastKey));
+    lastKey = now;
+    keys++;
+  }, true);
+  document.addEventListener("paste", (ev) => { if (inCodeForm(ev)) pasted = true; }, true);
+  // play does not bubble; a capturing listener still sees it
+  document.addEventListener("play", (ev) => { if (inCodeForm(ev)) audio = true; }, true);
+
+  widget.configure({
+    verifyFunction: async (payload, code) => {
+      try {
+        const resp = await fetch("/eqc/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code,
+            payload,
+            behavior: {
+              shown_ms: Math.round(performance.now() - shownAt),
+              keys,
+              key_gaps_ms: gaps.slice(0, 100),
+              pasted,
+              audio_played: audio,
+              reloads: Math.max(0, images - 1),
+            },
+          }),
+        });
+        return await resp.json();
+      } catch (err) {
+        // the widget does not catch a failing verifyFunction and would hang in "verifying"
+        return { verified: false, reason: String(err) };
+      }
+    },
   });
 </script>
 <script>

@@ -6,6 +6,8 @@ without ALTCHA Sentinel. See [SPEC.md](SPEC.md) for the design.
 
 - `pkg/codechallenge`: the library. Mints a proof of work plus a code image and audio,
   verifies the typed code, issues a pass token. No HTTP, no global state; banjax links it in.
+- `pkg/behavior`: features from the widget's human interaction signature and from the
+  code step, for scoring clients later (SPEC.md section 4.6).
 - `cmd/demo`: a small HTTP demo of the whole flow. Not a production component.
 - `web/`: demo pages and the pinned altcha@3.5.0 widget with its UI translations
   (`dist/main/altcha.i18n.min.js`, MIT),
@@ -27,7 +29,12 @@ Settings (env): `EQC_SECRET` (random per start if unset; never commit one),
 `EQC_CODE_LENGTH`, `EQC_TTL_SECONDS`, `EQC_PASS_TTL_SECONDS`, `EQC_POW_MAX_NUMBER`,
 `EQC_LISTEN`.
 
-Without Docker: `go run ./cmd/demo` (Go 1.25+).
+The demo records behaviour features (no IP, no User-Agent, nothing typed) to
+`data/features.jsonl`, one line per challenge and per verify. Label a session:
+`EQC_LABEL=human docker compose up`. `data/` is git-ignored; keep it that way. On Linux,
+make `data/` writable for the container's user (`mkdir -p data && chmod 777 data`).
+
+Without Docker: `go run ./cmd/demo` (Go 1.25+; set `EQC_FEATURES_FILE` to record).
 
 ## Tests
 

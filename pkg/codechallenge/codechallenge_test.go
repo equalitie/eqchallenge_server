@@ -107,6 +107,9 @@ func TestVerifyGivesPass(t *testing.T) {
 	if err != nil || !res.Verified || res.Pass == "" {
 		t.Fatalf("got %+v, %v", res, err)
 	}
+	if res.ID == "" || res.ID != c.ID() {
+		t.Fatalf("result ID %q, challenge ID %q", res.ID, c.ID())
+	}
 	if !is.VerifyPass(res.Pass, testBinding) {
 		t.Fatal("pass rejected for its own binding")
 	}

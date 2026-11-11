@@ -100,8 +100,16 @@ verifying the typed code.
    - The input has no `inputmode="numeric"`, so phones show the full keyboard.
 7. **Secure context.** `verify()` throws "Secure context (HTTPS) required." outside a secure
    context. `http://localhost` is fine for the demo; any other plain-HTTP host is not.
-8. Related, not needed now: the widget can send a "human interaction signature" (HIS) if the
-   server asks for it in the challenge response (`his.url`). Possible later input for option 4.
+8. **Human interaction signature (HIS)** (`src/his.ts`, on by default). If the response to the
+   challenge URL is `{"his": {"url": "..."}}` instead of a challenge, the widget POSTs
+   `{"his": {focus, pointer, scroll, touch, maxTouchPoints, time}}` there and takes the
+   challenge from that response. It keeps the last 60 samples of each series, at most one per
+   50 ms: pointer `[x, y, t]`, touch `[x, y, t, force, radiusX, radiusY]`, focus
+   `[elapsed, tabIndex, tag, keyboard]`, scroll `[y, t]`. With `auto="onload"` it is sent
+   before the visitor did anything, so behaviour needs the checkbox (`auto="off"`).
+9. **`verifyFunction`** replaces `verifyUrl` with page code that can send more than
+   `{code, payload}`. The widget does not catch it failing: it must return
+   `{verified: false, reason}` on errors, or the widget hangs in "verifying".
 
 ## 4. Design
 
@@ -184,6 +192,50 @@ Accessibility:
 - Escalation: invisible PoW → checkbox → code → block, driven by Baskerville or the First
   Responder per host, never global.
 - Skip non-browser paths (RSS, API, apps): they would treat a code challenge as a block.
+
+### 4.6 Behaviour and scoring (next stage)
+
+Goal: most people never see the image. Sentinel calls this adaptive captcha.
+
+```
+GET challenge URL  ->  {"his": {"url": "/eqc/his"}}
+POST HIS           ->  score  ->  high: PoW only
+                                  mid:  PoW + code (today, for everyone)
+                                  low:  harder PoW + code, or block
+POST code          ->  verify, with code step features
+```
+
+Signals (`pkg/behavior`, no HTTP, like `pkg/codechallenge`), aggregates only:
+- From the HIS: sample counts, keyboard focus moves, time of the first move, path length,
+  straightness, speed mean and variation, regularity of sample intervals, pauses, turns,
+  still samples, touch force and radius variation, `maxTouchPoints`.
+- From the code step, sent by the page through `verifyFunction`: time from the image to
+  submit, keystrokes and the gaps between them, paste, audio played, reloads. Never what
+  was typed.
+
+Plan:
+1. **Collect** (done in the demo): one JSON line per issued challenge (HIS features) and
+   per verify (result, code step features), joined by the challenge id, with a run label
+   (`EQC_LABEL`). Raw traces only with `EQC_FEATURES_RAW=1`, for lab sessions. Sources:
+   bot-tester runs (stock headless, Playwright with synthetic mouse, replayed human
+   traces), the human test from section 6; later weak labels in production (code solved or
+   not).
+2. **Train** offline in Python with the Baskerville tooling: logistic regression or a small
+   gradient-boosted tree model on these features.
+3. **Score in Go** inside banjax: the model exported as JSON (weights or trees), evaluated
+   per HIS post in microseconds, no cgo. The decision is needed when the challenge is
+   issued, so it cannot wait for Baskerville over Kafka. The score can also go to Kafka as
+   a feature for Baskerville.
+
+Limits:
+- Everything is client-supplied. A bot can post a recorded human trace, so the score only
+  picks the challenge, it never grants a pass alone. Bind the HIS to the challenge it got
+  (done: same id) and flag traces seen before (hash of the pointer series) in the Store.
+- Keyboard and screen-reader users have no pointer trace. No trace leads to the code (or
+  audio), never to a block.
+- Behaviour data is close to biometrics. Keep aggregates, no IP or User-Agent next to them,
+  no raw traces outside lab sessions, short retention. Datasets and results go to internal
+  reports, not this repository.
 
 ## 5. Prototype scope
 

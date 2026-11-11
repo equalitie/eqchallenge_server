@@ -12,3 +12,10 @@ services:
       EQC_TTL_SECONDS: ${EQC_TTL_SECONDS:-180}
       EQC_PASS_TTL_SECONDS: ${EQC_PASS_TTL_SECONDS:-3600}
       EQC_POW_MAX_NUMBER: ${EQC_POW_MAX_NUMBER:-1000}
+      # behaviour features for the scoring model, one JSON line per challenge and per verify,
+      # in ./data (git-ignored). Label each run: EQC_LABEL=human docker compose up
+      EQC_FEATURES_FILE: /data/features.jsonl
+      EQC_LABEL: ${EQC_LABEL:-unlabelled}
+      EQC_FEATURES_RAW: ${EQC_FEATURES_RAW:-0}
+    volumes:
+      - ./data:/data

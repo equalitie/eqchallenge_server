@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -17,6 +18,11 @@ import (
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	return newRecordingServer(t, nil)
+}
+
+func newRecordingServer(t *testing.T, rec *recorder) *httptest.Server {
+	t.Helper()
 	issuer, err := codechallenge.New(codechallenge.Config{
 		Secret:       "test-secret-not-for-production",
 		PoWMaxNumber: 5,
@@ -26,7 +32,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(newMux(issuer))
+	srv := httptest.NewServer(newMux(issuer, rec))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -48,9 +54,58 @@ func TestProtectedShowsChallenge(t *testing.T) {
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
-	for _, want := range []string{`challenge="/eqc/challenge"`, "verifyUrl", "/eqc/verify", "customElements.define"} {
+	for _, want := range []string{`challenge="/eqc/challenge"`, `auto="off"`, "verifyFunction", "/eqc/verify", "customElements.define"} {
 		if !bytes.Contains(body, []byte(want)) {
 			t.Fatalf("challenge page lacks %q", want)
+		}
+	}
+}
+
+const testHIS = `{"his":{"focus":[[0,0,4,0]],"maxTouchPoints":0,"pointer":[[10,10,900],[40,22,950],[90,30,1010],[120,31,1100]],"scroll":[],"time":1762800000000,"touch":[]}}`
+
+func postJSON(t *testing.T, url, body string) (*http.Response, []byte) {
+	t.Helper()
+	resp, err := http.Post(url, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp, b
+}
+
+// fetchChallenge does what the widget does: GET the challenge URL, get asked for the HIS,
+// post it, take the challenge.
+func fetchChallenge(t *testing.T, srv *httptest.Server) codechallenge.Challenge {
+	t.Helper()
+	resp, body := get(t, srv.URL+"/eqc/challenge")
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "/json") {
+		t.Fatalf("challenge content type %q: the widget needs JSON", ct)
+	}
+	var ask struct {
+		HIS struct {
+			URL string `json:"url"`
+		} `json:"his"`
+	}
+	if err := json.Unmarshal(body, &ask); err != nil || ask.HIS.URL == "" {
+		t.Fatalf("no HIS request: %s", body)
+	}
+	resp, body = postJSON(t, srv.URL+ask.HIS.URL, testHIS)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(resp.Header.Get("Content-Type"), "/json") {
+		t.Fatalf("HIS: status %d", resp.StatusCode)
+	}
+	var c codechallenge.Challenge
+	if err := json.Unmarshal(body, &c); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestBadHIS(t *testing.T) {
+	srv := newTestServer(t)
+	for _, body := range []string{"", "{}", `{"his":{"pointer":"x"}}`} {
+		if resp, _ := postJSON(t, srv.URL+"/eqc/his", body); resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("HIS %q: status %d", body, resp.StatusCode)
 		}
 	}
 }
@@ -59,16 +114,9 @@ func TestProtectedShowsChallenge(t *testing.T) {
 // the image, so this checks the wrong-code path; pkg/codechallenge tests the right one.
 func TestWidgetFlow(t *testing.T) {
 	srv := newTestServer(t)
-	resp, body := get(t, srv.URL+"/eqc/challenge")
-	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "/json") {
-		t.Fatalf("challenge content type %q: the widget needs JSON", ct)
-	}
-	var c codechallenge.Challenge
-	if err := json.Unmarshal(body, &c); err != nil {
-		t.Fatal(err)
-	}
+	c := fetchChallenge(t, srv)
 	if c.CodeChallenge.Image == "" || c.CodeChallenge.Audio == "" {
-		t.Fatalf("no codeChallenge: %s", body)
+		t.Fatalf("no codeChallenge: %+v", c.CodeChallenge)
 	}
 
 	audio, wav := get(t, srv.URL+c.CodeChallenge.Audio+"&language=ru")
@@ -140,6 +188,54 @@ func TestWidgetLanguage(t *testing.T) {
 		r.Header.Set("Accept-Language", c.accept)
 		if got := widgetLanguage(r); got != c.want {
 			t.Errorf("?%s, Accept-Language %q: got %q, want %q", c.query, c.accept, got, c.want)
+		}
+	}
+}
+
+func TestRecording(t *testing.T) {
+	path := t.TempDir() + "/features.jsonl"
+	rec, err := openRecorder(path, "test", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newRecordingServer(t, rec)
+	c := fetchChallenge(t, srv)
+	ac := altcha.Challenge{Parameters: c.Parameters, Signature: c.Signature}
+	sol, err := altcha.SolveChallenge(altcha.SolveChallengeOptions{Challenge: ac, DeriveKey: altcha.DeriveKeyPBKDF2()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := json.Marshal(altcha.Payload{Challenge: ac, Solution: *sol})
+	req, _ := json.Marshal(map[string]any{
+		"code":     "000000x",
+		"payload":  base64.StdEncoding.EncodeToString(p),
+		"behavior": map[string]any{"shown_ms": 4100, "keys": 6, "key_gaps_ms": []int{200, 180, 260, 150, 210}},
+	})
+	postJSON(t, srv.URL+"/eqc/verify", string(req))
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want an issued and a verify line, got:\n%s", raw)
+	}
+	var issued, verify map[string]any
+	json.Unmarshal([]byte(lines[0]), &issued)
+	json.Unmarshal([]byte(lines[1]), &verify)
+	if issued["event"] != "issued" || verify["event"] != "verify" || issued["id"] != c.ID() || verify["id"] != c.ID() {
+		t.Fatalf("lines not joined by challenge id:\n%s", raw)
+	}
+	if issued["label"] != "test" || issued["his"].(map[string]any)["pointer_n"] != float64(4) || issued["his_raw"] != nil {
+		t.Fatalf("issued line: %s", lines[0])
+	}
+	if verify["result"] != "wrong_code" || verify["code_step"].(map[string]any)["keys"] != float64(6) {
+		t.Fatalf("verify line: %s", lines[1])
+	}
+	for _, private := range []string{"127.0.0.1", "Go-http-client", "000000"} {
+		if strings.Contains(string(raw), private) {
+			t.Fatalf("recorded %q:\n%s", private, raw)
 		}
 	}
 }

@@ -6,18 +6,22 @@
 //	GET  /protected      200 with a valid pass cookie, otherwise the challenge page
 //	GET  /reset          drops the pass cookie
 //	GET  /baskerville.gif  the dog on the challenge page
-//	GET  /eqc/challenge  proof of work + codeChallenge, for the widget
+//	GET  /eqc/challenge  asks the widget for its human interaction signature (HIS)
+//	POST /eqc/his        takes the HIS, returns proof of work + codeChallenge
 //	GET  /eqc/audio?t=   the spoken code
 //	POST /eqc/verify     checks the code, sets the pass cookie
 //
 // Config from env: EQC_SECRET (random per start if unset), EQC_LISTEN (default :8080),
 // EQC_CODE_LENGTH, EQC_TTL_SECONDS, EQC_PASS_TTL_SECONDS, EQC_POW_MAX_NUMBER.
+// Behaviour recording: EQC_FEATURES_FILE (JSONL, off if unset), EQC_LABEL (written on every
+// line, e.g. "human" or "bot-headless"), EQC_FEATURES_RAW=1 (also the raw HIS traces).
 package main
 
 import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -26,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/equalitie/eqchallenge_server/pkg/behavior"
 	"github.com/equalitie/eqchallenge_server/pkg/codechallenge"
 	"github.com/equalitie/eqchallenge_server/web"
 )
@@ -54,13 +59,20 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	rec, err := openRecorder(os.Getenv("EQC_FEATURES_FILE"), os.Getenv("EQC_LABEL"), os.Getenv("EQC_FEATURES_RAW") == "1")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if rec != nil {
+		log.Printf("recording behaviour features to %s, label %q", os.Getenv("EQC_FEATURES_FILE"), os.Getenv("EQC_LABEL"))
+	}
 	addr := os.Getenv("EQC_LISTEN")
 	if addr == "" {
 		addr = ":8080"
 	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           newMux(issuer),
+		Handler:           newMux(issuer, rec),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Printf("listening on %s", addr)
@@ -80,7 +92,7 @@ func envInt(name string) int {
 	return n
 }
 
-func newMux(issuer *codechallenge.Issuer) *http.ServeMux {
+func newMux(issuer *codechallenge.Issuer, rec *recorder) *http.ServeMux {
 	mux := http.NewServeMux()
 	hasPass := func(r *http.Request) bool {
 		c, err := r.Cookie(passCookie)
@@ -96,8 +108,8 @@ func newMux(issuer *codechallenge.Issuer) *http.ServeMux {
 			render(w, http.StatusOK, "granted.html", nil)
 			return
 		}
+		// no verifyUrl: the page's verifyFunction posts the code with its code step features
 		widgetConfig, _ := json.Marshal(map[string]any{
-			"verifyUrl":  "/eqc/verify",
 			"language":   widgetLanguage(r),
 			"hideFooter": true,
 			"hideLogo":   true,
@@ -120,13 +132,36 @@ func newMux(issuer *codechallenge.Issuer) *http.ServeMux {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 
+	// The widget answers {"his": {"url": ...}} by posting its human interaction signature
+	// there and taking the challenge from the response. This is where a score would choose
+	// the challenge (PoW only, PoW + code, harder PoW); for now every client gets the code and
+	// the features are only recorded.
 	mux.HandleFunc("GET /eqc/challenge", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"his": map[string]string{"url": "/eqc/his"}})
+	})
+
+	mux.HandleFunc("POST /eqc/his", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 256<<10))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+			return
+		}
+		his, err := behavior.ParseHIS(body)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+			return
+		}
 		c, err := issuer.Mint(clientBinding(r))
 		if err != nil {
 			log.Printf("mint: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot create a challenge"})
 			return
 		}
+		fields := map[string]any{"his": behavior.Features(his)}
+		if rec != nil && rec.raw {
+			fields["his_raw"] = his
+		}
+		rec.record("issued", c.ID(), fields)
 		writeJSON(w, http.StatusOK, c)
 	})
 
@@ -143,8 +178,9 @@ func newMux(issuer *codechallenge.Issuer) *http.ServeMux {
 
 	mux.HandleFunc("POST /eqc/verify", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Code    string `json:"code"`
-			Payload string `json:"payload"`
+			Code     string             `json:"code"`
+			Payload  string             `json:"payload"`
+			Behavior *behavior.CodeStep `json:"behavior"`
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -157,6 +193,17 @@ func newMux(issuer *codechallenge.Issuer) *http.ServeMux {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 			return
 		}
+		fields := map[string]any{"result": "passed"}
+		if !res.Verified {
+			fields["result"] = res.Reason
+		}
+		if req.Behavior != nil {
+			// implausible features are dropped, not held against the code
+			if f, err := req.Behavior.Summarise(); err == nil {
+				fields["code_step"] = f
+			}
+		}
+		rec.record("verify", res.ID, fields)
 		if !res.Verified {
 			log.Printf("verify: %s", res.Reason)
 			writeJSON(w, http.StatusOK, map[string]any{"verified": false, "reason": reasonText[res.Reason]})

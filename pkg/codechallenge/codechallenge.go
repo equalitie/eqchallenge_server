@@ -127,6 +127,13 @@ type Challenge struct {
 	CodeChallenge CodeChallenge              `json:"codeChallenge"`
 }
 
+// ID identifies the challenge in logs and in Result.ID, so what is recorded when it is
+// issued can be joined with how it ended.
+func (c Challenge) ID() string {
+	id, _ := c.Parameters.Data[dataID].(string)
+	return id
+}
+
 // Mint creates a challenge bound to binding (the client IP, or whatever the caller binds
 // passes to). The code itself is only in the image, the audio token and, hashed, the data.
 func (is *Issuer) Mint(binding string) (Challenge, error) {
@@ -202,6 +209,7 @@ type Result struct {
 	Verified bool
 	Reason   Reason // set when not verified
 	Pass     string // set when verified
+	ID       string // the challenge's ID, once its signature checked out
 }
 
 // Verify checks the widget's PoW payload and the typed code for a client with binding. An
@@ -235,17 +243,17 @@ func (is *Issuer) Verify(payloadB64, code, binding string) (Result, error) {
 	codeHash, _ := data[dataCodeHash].(string)
 	// a plain banjax ALTCHA challenge has no code; it must not count as solved
 	if boundTo != binding || id == "" || codeHash == "" {
-		return Result{Reason: ReasonInvalid}, nil
+		return Result{Reason: ReasonInvalid, ID: id}, nil
 	}
 	until := time.Unix(payload.Challenge.Parameters.ExpiresAt, 0)
 	if is.store.CountAttempt(id, until) > is.cfg.MaxAttempts {
-		return Result{Reason: ReasonTooManyAttempts}, nil
+		return Result{Reason: ReasonTooManyAttempts, ID: id}, nil
 	}
 	if !hmac.Equal([]byte(is.keys.codeHash(id, normaliseCode(code))), []byte(codeHash)) {
-		return Result{Reason: ReasonWrongCode}, nil
+		return Result{Reason: ReasonWrongCode, ID: id}, nil
 	}
 	if !is.store.MarkUsed(id, until) {
-		return Result{Reason: ReasonUsed}, nil
+		return Result{Reason: ReasonUsed, ID: id}, nil
 	}
 	pass, err := is.keys.signPass(passClaims{
 		Binding: binding,
@@ -256,7 +264,7 @@ func (is *Issuer) Verify(payloadB64, code, binding string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Verified: true, Pass: pass}, nil
+	return Result{Verified: true, Pass: pass, ID: id}, nil
 }
 
 // VerifyPass reports whether pass is a valid, unexpired pass token for binding.
