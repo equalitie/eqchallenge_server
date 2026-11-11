@@ -1,5 +1,5 @@
-// Package web holds the demo pages and the pinned altcha widget (3.5.0,
-// dist/main/altcha.min.js from the v3.5.0 tag, MIT, see LICENSE-altcha.txt).
+// Package web holds the demo pages and the pinned altcha widget (3.5.0 with all its UI
+// translations, dist/main/altcha.i18n.min.js from the v3.5.0 tag, MIT, see LICENSE-altcha.txt).
 // The demo inlines the widget into the page, as banjax does: no CDN.
 package web
 
@@ -8,10 +8,10 @@ import (
 	"html/template"
 )
 
-//go:embed *.html altcha-3.5.0.min.js
+//go:embed *.html altcha-3.5.0.i18n.min.js
 var files embed.FS
 
-// Widget is the altcha@3.5.0 bundle, to inline in a <script type="module">.
+// Widget is the altcha@3.5.0 i18n bundle, to inline in a <script type="module">.
 var Widget template.JS
 
 // Pages are the demo pages, each executed by its file name: index.html, challenge.html,
@@ -19,7 +19,7 @@ var Widget template.JS
 var Pages = map[string]*template.Template{}
 
 func init() {
-	b, err := files.ReadFile("altcha-3.5.0.min.js")
+	b, err := files.ReadFile("altcha-3.5.0.i18n.min.js")
 	if err != nil {
 		panic(err)
 	}

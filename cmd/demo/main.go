@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/equalitie/eqchallenge_server/pkg/codechallenge"
@@ -95,10 +96,10 @@ func newMux(issuer *codechallenge.Issuer) *http.ServeMux {
 			return
 		}
 		widgetConfig, _ := json.Marshal(map[string]any{
-			"verifyUrl":              "/eqc/verify",
-			"audioChallengeLanguage": r.URL.Query().Get("lang"),
-			"hideFooter":             true,
-			"hideLogo":               true,
+			"verifyUrl":  "/eqc/verify",
+			"language":   widgetLanguage(r),
+			"hideFooter": true,
+			"hideLogo":   true,
 		})
 		// 429 like banjax's challenge pages
 		render(w, http.StatusTooManyRequests, "challenge.html", map[string]any{
@@ -175,6 +176,19 @@ var reasonText = map[codechallenge.Reason]string{
 	codechallenge.ReasonTooManyAttempts: "Too many attempts. Try again with a new image.",
 	codechallenge.ReasonUsed:            "This image was already used. Try again with a new one.",
 	codechallenge.ReasonInvalid:         "Verification failed. Reload the page.",
+}
+
+// widgetLanguage is the widget's UI language, which the widget also asks the audio in: ?lang=
+// if given, otherwise the visitor's first Accept-Language. The widget falls back to English
+// for languages it has no strings for, and the audio for languages it has no voice for.
+// Without it the widget would take <html lang>, the language of the page text.
+func widgetLanguage(r *http.Request) string {
+	if lang := r.URL.Query().Get("lang"); lang != "" {
+		return lang
+	}
+	first, _, _ := strings.Cut(r.Header.Get("Accept-Language"), ",")
+	tag, _, _ := strings.Cut(first, ";")
+	return strings.TrimSpace(tag)
 }
 
 // clientBinding is what challenges and passes are bound to: the client IP. The demo is

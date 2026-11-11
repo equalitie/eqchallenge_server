@@ -56,6 +56,12 @@ verifying the typed code.
      (for example `data:image/png;base64,...`) is used as is.
    - `audio`: optional; if present the widget shows an audio button and loads the URL with a
      `language` query parameter added (`audioChallengeLanguage` config, else the UI language).
+     The UI language is the `language` config, else `<html lang>`, else the browser's
+     languages, matched to the strings the bundle has. `altcha.min.js` has English only, so
+     audio is always English with it; `altcha.i18n.min.js` (same release, 179 KB instead of
+     119 KB) has all UI translations, and then UI and audio follow the visitor. The demo
+     uses the i18n bundle and sets `language` from `Accept-Language`; banjax should do the
+     same, since its page `lang` is the page text's language.
    - `length`: becomes the input's `minlength` and `maxlength`.
    - Relative `image` and `audio` URLs are resolved against the challenge URL when the
      challenge was fetched, otherwise against the page.

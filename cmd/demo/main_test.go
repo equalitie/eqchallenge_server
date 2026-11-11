@@ -127,3 +127,19 @@ func TestForgedPassCookie(t *testing.T) {
 		t.Fatalf("forged pass: status %d", resp.StatusCode)
 	}
 }
+
+func TestWidgetLanguage(t *testing.T) {
+	cases := []struct{ query, accept, want string }{
+		{"", "ru-RU,ru;q=0.9,en;q=0.8", "ru-RU"},
+		{"", "fa;q=0.9", "fa"},
+		{"", "", ""},
+		{"lang=pt", "ru", "pt"},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest("GET", "/protected?"+c.query, nil)
+		r.Header.Set("Accept-Language", c.accept)
+		if got := widgetLanguage(r); got != c.want {
+			t.Errorf("?%s, Accept-Language %q: got %q, want %q", c.query, c.accept, got, c.want)
+		}
+	}
+}
