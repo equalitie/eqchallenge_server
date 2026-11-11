@@ -147,9 +147,19 @@ nginx) is an open question for Jeremy.
 
 ### 4.4 Image and audio generation
 
-Prototype: **`github.com/dchest/captcha`** (MIT). It renders digit images (PNG) and spoken
-digits (WAV). Audio languages are said to be en, ja, ru, zh: verify. Then evaluate whether
-its distortion beats tesseract (section 6). If not, write our own renderer (`image/draw` + a
+Prototype: **`github.com/dchest/captcha`** (MIT) for the image (digits, PNG). Evaluate whether
+its distortion beats tesseract (section 6).
+
+Audio: dchest's own audio was unintelligible (about five reversed digits at once in the
+background, at nearly the level of the code; 8-bit with clipping). We keep its digit
+recordings (en, ru, ja, zh, pt; `pkg/codechallenge/sounds`, MIT) and mix them ourselves: the
+code read twice with pauses, quiet noise and at most one reversed digit in the background,
+16-bit. Noise is kept low on purpose: speech-to-text gets through noise anyway, people who
+need audio do not. The mix is deterministic per challenge, so replays don't average the
+noise out. The widget picks the language (`language` query parameter, see section 3);
+unknown languages fall back to English.
+
+Image: if dchest fails the OCR test, write our own renderer (`image/draw` + a
 TTF font + warp, noise lines, per-character rotation). Plan for that, since the dchest style
 is well known to OCR tools.
 

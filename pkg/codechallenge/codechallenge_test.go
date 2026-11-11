@@ -361,3 +361,30 @@ func TestNewValidates(t *testing.T) {
 		t.Fatal("nil store accepted")
 	}
 }
+
+func TestAudioMix(t *testing.T) {
+	k := deriveKeys(testSecret)
+	seed := k.audioSeed("challenge-1")
+	a, err := renderAudio(seed, "123456", "ru")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := renderAudio(seed, "123456", "ru")
+	if !bytes.Equal(a, b) {
+		t.Fatal("same seed, different audio: replays would let a client average the noise")
+	}
+	c, _ := renderAudio(k.audioSeed("challenge-2"), "123456", "ru")
+	if bytes.Equal(a, c) {
+		t.Fatal("different challenges, same audio")
+	}
+	if string(a[:4]) != "RIFF" || string(a[8:16]) != "WAVEfmt " || string(a[36:40]) != "data" {
+		t.Fatal("bad WAV header")
+	}
+	// two readings of six digits with pauses: long enough to follow, short enough to bear
+	if secs := float64(len(a)-44) / 2 / audioSampleRate; secs < 8 || secs > 25 {
+		t.Fatalf("audio is %.1f s", secs)
+	}
+	if _, err := renderAudio(seed, "12a456", "en"); err == nil {
+		t.Fatal("non-digit code rendered")
+	}
+}

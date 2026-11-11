@@ -276,7 +276,7 @@ func (is *Issuer) Audio(token, lang, binding string) ([]byte, error) {
 	if t.Binding != binding || time.Now().Unix() >= t.Exp {
 		return nil, errors.New("codechallenge: audio token expired or not for this client")
 	}
-	return renderAudio(t.ID, t.Code, lang)
+	return renderAudio(is.keys.audioSeed(t.ID), t.Code, lang)
 }
 
 // decodePayload reads the widget's v2 payload: base64(JSON{challenge, solution}).
