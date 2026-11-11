@@ -3,6 +3,7 @@ package codechallenge
 import (
 	"bytes"
 	"encoding/base64"
+	"image/color"
 	"strings"
 
 	"github.com/dchest/captcha"
@@ -15,8 +16,11 @@ import (
 // renderImageDataURI draws code as a PNG and returns it as a data: URI, so the challenge
 // page needs no second request for the image.
 func renderImageDataURI(id, code string, width, height int) (string, error) {
+	img := captcha.NewImage(id, digitValues(code), width, height)
+	// dchest leaves the background transparent, which is unreadable on a dark page
+	img.Palette[0] = color.White
 	var buf bytes.Buffer
-	if _, err := captcha.NewImage(id, digitValues(code), width, height).WriteTo(&buf); err != nil {
+	if _, err := img.WriteTo(&buf); err != nil {
 		return "", err
 	}
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes()), nil

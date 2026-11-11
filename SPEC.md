@@ -73,8 +73,9 @@ verifying the typed code.
    are set. We leave them off.
 4. **Response.** `{"verified": true, "payload": "<string>"}` marks it verified. The widget
    replaces its payload with ours and fires `verified`. `{"verified": false, "reason": "..."}`
-   shows the reason. On HTTP >= 400 it shows `error` from a JSON body. The response must be
-   `Content-Type: application/json`.
+   puts the reason only in the error's `title` tooltip; the visible text is always the
+   generic `strings.error` ("Verification failed. Try again later."). On HTTP >= 400 it shows
+   `error` from a JSON body. The response must be `Content-Type: application/json`.
 5. **Reload button** calls `verify()` again: it re-reads the `challenge` source and solves the
    PoW again. **A wrong code also ends the attempt**: the widget goes to the error state, the
    code form closes (it is shown only in the `code` state), and the next click runs `verify()`
@@ -85,9 +86,15 @@ verifying the typed code.
    - With the stock widget a person gets one try per challenge, and each try costs a PoW. The
      3-attempt limit in 4.2 is for clients that call `verifyUrl` directly. Keep the PoW cheap
      for code challenges, or a typo costs the visitor seconds of solving on a phone.
-6. **Secure context.** `verify()` throws "Secure context (HTTPS) required." outside a secure
+6. **Code form quirks** (seen in the demo with Chrome):
+   - The image is styled `height: 50px`, which shrinks a 240×80 image to 150×50. The page
+     must override it: `altcha-widget .altcha-code-challenge-image { height: auto; max-width: 100% }`.
+   - `maxlength` = `length` counts everything typed, so "12 34-56" is cut to "12 34-". The
+     server still strips spaces and dashes, but people should type digits only.
+   - The input has no `inputmode="numeric"`, so phones show the full keyboard.
+7. **Secure context.** `verify()` throws "Secure context (HTTPS) required." outside a secure
    context. `http://localhost` is fine for the demo; any other plain-HTTP host is not.
-7. Related, not needed now: the widget can send a "human interaction signature" (HIS) if the
+8. Related, not needed now: the widget can send a "human interaction signature" (HIS) if the
    server asks for it in the challenge response (`his.url`). Possible later input for option 4.
 
 ## 4. Design
@@ -103,7 +110,8 @@ A Go module with:
   mints the ALTCHA PoW too, so the whole flow can be shown and bot-tested without touching
   banjax. It is not a production component; after the banjax integration it is only a test bed.
 - `web/`: demo page with the pinned altcha@3.5.0 widget, inlined like banjax does.
-- `docker-compose.yml`: the demo, plus the bot tester as a second service.
+- `docker-compose.yml`: the demo. The bot tester joins it as a second service with the
+  section 6 scenarios.
 
 ### 4.2 Stateless by default
 

@@ -1,0 +1,14 @@
+# docker compose up --build, then open http://localhost:8080/protected
+# Use localhost: the widget needs a secure context, and plain HTTP counts only on localhost.
+services:
+  demo:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # unset: a random secret per start. Set it in your shell or a local .env, never in git.
+      EQC_SECRET: ${EQC_SECRET:-}
+      EQC_CODE_LENGTH: ${EQC_CODE_LENGTH:-6}
+      EQC_TTL_SECONDS: ${EQC_TTL_SECONDS:-180}
+      EQC_PASS_TTL_SECONDS: ${EQC_PASS_TTL_SECONDS:-3600}
+      EQC_POW_MAX_NUMBER: ${EQC_POW_MAX_NUMBER:-1000}

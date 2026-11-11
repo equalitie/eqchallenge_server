@@ -1,0 +1,29 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{template "title" .}} · eqchallenge demo</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #f6f6f4; --fg: #1d1d1b; --muted: #6b6b66; --card: #fff; --line: #deded8; --accent: #e33624; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #161615; --fg: #ececea; --muted: #9a9a94; --card: #20201e; --line: #34342f; }
+    }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+    main { max-width: 34rem; margin: 10vh auto; padding: 0 16px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 24px; }
+    h1 { font-size: 1.3rem; margin: 0 0 8px; }
+    p { margin: 0 0 12px; }
+    .muted { color: var(--muted); font-size: .9rem; }
+    a { color: var(--accent); }
+    altcha-widget { display: block; margin-top: 16px; }
+    /* match the widget to the page in both themes */
+    /* the widget fixes the code image at 50px high, which shrinks a 240×80 image to 150×50 */
+    altcha-widget .altcha-code-challenge-image { height: auto; max-width: 100%; }
+    altcha-widget { --altcha-color-base: var(--card); --altcha-color-base-content: var(--fg); --altcha-border-color: var(--line); --altcha-color-primary: var(--accent); }
+  </style>
+</head>
+<body>
+  <main><div class="card">{{template "content" .}}</div></main>
+</body>
+</html>{{end}}

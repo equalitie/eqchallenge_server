@@ -1,0 +1,32 @@
+{{define "title"}}Verification{{end}}
+{{define "content"}}
+<h1>One more step</h1>
+<p>We need to check that you are not a bot. Enter the digits from the image, or press the
+speaker button to hear them.</p>
+<!--
+  challenge is a URL, not inlined JSON: the reload button and a retry after a wrong code
+  call verify() again, which re-reads this source. With inlined JSON they would get the
+  same, already used challenge back (SPEC.md section 3).
+-->
+<altcha-widget id="altcha" challenge="/eqc/challenge" auto="onload" type="checkbox"
+               configuration="{{.WidgetConfig}}"></altcha-widget>
+<p class="muted" id="altcha-failure" hidden>The check could not run. Reload the page to try again.</p>
+<script type="module">{{.Widget}}</script>
+<script type="module">
+  const widget = document.getElementById("altcha");
+  // /eqc/verify sets the pass cookie in its response; reload to get the page
+  widget.addEventListener("statechange", (ev) => {
+    if (ev.detail.state === "verified") {
+      location.reload();
+    }
+  });
+</script>
+<script>
+  // the widget bundle failed to run: say so instead of showing an empty box
+  window.addEventListener("load", () => {
+    if (!window.customElements || !customElements.get("altcha-widget")) {
+      document.getElementById("altcha-failure").hidden = false;
+    }
+  });
+</script>
+{{end}}
